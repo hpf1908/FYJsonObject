@@ -1,0 +1,3 @@
+# FYJsonObject
+
+将json字符串解析出来的dictionary自动解析为对象
