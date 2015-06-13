@@ -33,6 +33,50 @@
     [self testObject2Dict];
     [self testObjectArray2DictArray];
     [self testEncoderAndDecoder];
+    
+    // 测试json 返回的object
+    [self testJsonSerilizer];
+}
+
+#pragma mark - create test object
+
+- (NSDictionary*)createNestedFooDictionary
+{
+    NSMutableDictionary* fooDict = [[NSMutableDictionary alloc] init];
+    NSString* name = @"mike";
+    int age = 123;
+    [fooDict setObject:name forKey:@"name"];
+    [fooDict setObject:[NSNumber numberWithInt:age] forKey:@"age"];
+    
+    NSString* city = @"guangzhou";
+    NSMutableDictionary* barDict = [[NSMutableDictionary alloc] init];
+    [barDict setObject:city forKey:@"city"];
+    
+    [fooDict setObject:barDict forKey:@"bar"];
+    return fooDict;
+}
+
+- (NSString*)testJsonStr:(id)obj
+{
+    NSData* data = [NSJSONSerialization dataWithJSONObject:obj options:NSJSONWritingPrettyPrinted error:nil];
+    return [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+}
+
+#pragma mark - test json Serilizer
+
+- (void)testJsonSerilizer
+{
+    NSLog(@"testJsonSerilizer begin ....");
+    
+    NSString* jsonStr = [self testJsonStr:[self createNestedFooDictionary]];
+    NSLog(@"jsonStr:\n%@",jsonStr);
+    NSDictionary* dict = [NSJSONSerialization JSONObjectWithData:[jsonStr dataUsingEncoding:NSUTF8StringEncoding] options:NSJSONReadingMutableContainers error:nil];
+    TestFoo* newFoo = [FYJsonObject objectWithClass:[TestFoo class] jsonDictionary:dict];
+    assert([newFoo.name isEqualToString:@"mike"]);
+    assert(newFoo.age == 123);
+    assert([newFoo.bar.city isEqualToString:@"guangzhou"]);
+    
+    NSLog(@"testJsonSerilizer success ....");
 }
 
 #pragma mark - test dict to object
