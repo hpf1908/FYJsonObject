@@ -7,12 +7,39 @@
 //
 
 #import "TestFoo.h"
+#import "FYJsonObject.h"
 
 @implementation TestBar
+
+- (void)encodeWithCoder:(NSCoder *)coder
+{
+    [FYJsonObject encodeWithCoder:coder object:self];
+}
+
+- (id)initWithCoder:(NSCoder *)coder
+{
+    if (self = [super init]) {
+        [FYJsonObject initWithCoder:coder object:self];
+    }
+    return self;
+}
 
 @end
 
 @implementation TestFoo
+
+- (void)encodeWithCoder:(NSCoder *)coder
+{
+    [FYJsonObject encodeWithCoder:coder object:self];
+}
+
+- (id)initWithCoder:(NSCoder *)coder
+{
+    if (self = [super init]) {
+        [FYJsonObject initWithCoder:coder object:self];
+    }
+    return self;
+}
 
 - (Class)clsWithCollectionProperyName:(NSString*)propertyName
 {

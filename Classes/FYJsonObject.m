@@ -31,7 +31,6 @@
 + (FYJsonPropertyInfo*)createPropertyInfo:(objc_property_t)prop
 {
     FYJsonPropertyInfo* propertyInfo = [FYJsonPropertyInfo new];
-    
     propertyInfo.name = [NSString stringWithUTF8String:property_getName(prop)];
     
     NSString *attributeStr = [NSString stringWithUTF8String:property_getAttributes(prop)];
@@ -60,7 +59,12 @@
     return propertyInfo;
 }
 
-+ (NSDictionary *)propertyDictWithClass:(Class)class
++ (NSDictionary*)filterDefaultProperty
+{
+    return [self propertyDictWithClass:[NSObject class] filterDictionary:nil];
+}
+
++ (NSDictionary *)propertyDictWithClass:(Class)class filterDictionary:(NSDictionary*)filterDicts
 {
     static NSMutableDictionary *_propsDescriptionDicts;
     
@@ -85,8 +89,12 @@
             for (i = 0; i < count; i++)
             {
                 objc_property_t property = properties[i];
+                NSString* properName = [NSString stringWithUTF8String:property_getName(property)];
                 FYJsonPropertyInfo* propertyInfo = [self createPropertyInfo:property];
-                [propsDescription setObject:propertyInfo forKey:propertyInfo.name];
+                
+                if ([filterDicts objectForKey:properName] == nil) {
+                    [propsDescription setObject:propertyInfo forKey:propertyInfo.name];
+                }
             }
             
             free(properties);
@@ -96,13 +104,14 @@
     }
 }
 
+#pragma mark - dictionary to object
 /*
  * 动态设值
  * 参考：https://developer.apple.com/library/mac/documentation/Cocoa/Conceptual/ObjCRuntimeGuide/Articles/ocrtTypeEncodings.html
  */
 + (id)objectWithClass:(Class)cls jsonDictionary:(NSDictionary*)jsonDict
 {
-    NSDictionary* propDicts = [self propertyDictWithClass:cls];
+    NSDictionary* propDicts = [self propertyDictWithClass:cls filterDictionary:[self filterDefaultProperty]];
     id newObject = [cls new];
     
     for (NSString* jsonKey in jsonDict) {
@@ -121,6 +130,11 @@
         FYJsonPropertyInfo* propertyInfo = [propDicts objectForKey:propertyName];
         
         if (propertyInfo == nil || jsonValue == nil) {
+            continue;
+        }
+        
+        //如果是只读的话就忽略掉
+        if (propertyInfo.readOnly) {
             continue;
         }
         
@@ -249,9 +263,183 @@
     return nil;
 }
 
++ (NSArray*)objectArrayWithClass:(Class)cls jsonArray:(NSArray*)jsonArray
+{
+    NSMutableArray* result = [[NSMutableArray alloc] initWithCapacity:jsonArray.count];
+    
+    for (NSDictionary* item in jsonArray) {
+        if ([item isKindOfClass:[NSDictionary class]]) {
+            id newItem = [self objectWithClass:cls jsonDictionary:item];
+            [result addObject:newItem];
+        }
+    }
+    return result;
+}
+
+#pragma mark - object to dictionary
+
++ (BOOL)notAllowAdapterToDict:(id)obj
+{
+    if ([obj isKindOfClass:[NSNumber class]] ||
+        [obj isKindOfClass:[NSString class]] ||
+        [obj isKindOfClass:[NSDictionary class]] ||
+        [obj isKindOfClass:[NSArray class]] ||
+        [obj isKindOfClass:[NSData class]] ) {
+        return YES;
+    } else {
+        return NO;
+    }
+}
+
 + (NSDictionary*)jsonDictWithObject:(id)object
 {
-    return nil;
+    if (object == nil) {
+        return nil;
+    }
+    
+    if ([self notAllowAdapterToDict:object]) {
+        return nil;
+    }
+    
+    NSMutableDictionary* resultDict = [NSMutableDictionary new];
+    
+    NSDictionary* propertyDicts = [self propertyDictWithClass:[object class] filterDictionary:[self filterDefaultProperty]];
+    
+    for (NSString* properName in propertyDicts) {
+        
+        FYJsonPropertyInfo* propertyInfo = [propertyDicts objectForKey:properName];
+        
+        switch ([propertyInfo.type characterAtIndex:0])
+        {
+            case 'c':   // A char
+            case 'i':   // An int
+            case 's':   // A short
+            case 'l':   // A long
+            case 'q':   // long long
+            case 'C':   // An unsigned char
+            case 'I':   // An unsigned int
+            case 'S':   // An unsigned short
+            case 'L':   // An unsigned long
+            case 'Q':   // An unsigned long long
+            case 'f':   // A float
+            case 'd':   // A double
+            case 'B':   // A C++ bool or a C99 _Bool
+            {
+                id objValue = [object valueForKey:properName];
+                if (objValue != nil) {
+                    [resultDict setObject:objValue forKey:properName];
+                }
+                break;
+            }
+            case '@':
+            {
+                id objValue = [object valueForKey:properName];
+                
+                if (objValue) {
+                    
+                    if ([objValue isKindOfClass:[NSString class]] || [objValue isKindOfClass:[NSNumber class]]) {
+                        
+                        [resultDict setObject:objValue forKey:properName];
+                        
+                    } else if([objValue isKindOfClass:[NSArray class]]){
+                        
+                        NSArray* objArray = (NSArray*)objValue;
+                        NSMutableArray* newArr = [NSMutableArray new];
+                        
+                        for (id obj in objArray) {
+                            NSDictionary* objDict = [self jsonDictWithObject:obj];
+                            if (objDict != nil) {
+                                [newArr addObject:objDict];
+                            }
+                        }
+                        
+                        [resultDict setObject:newArr forKey:properName];
+                        
+                    } else if([objValue isKindOfClass:[NSDictionary class]]){
+                        
+                        NSDictionary* objDict = (NSDictionary*)objValue;
+                        NSMutableDictionary* newDict = [NSMutableDictionary new];
+                        
+                        for (NSString* key in objDict) {
+                            NSDictionary* newObjDict = [self jsonDictWithObject:[objDict objectForKey:key]];
+                            if (newObjDict != nil) {
+                                [newDict setObject:newObjDict forKey:key];
+                            }
+                        }
+                        
+                        [resultDict setObject:newDict forKey:properName];
+                        
+                    } else {
+                        NSDictionary* objDict = [self jsonDictWithObject:objValue];
+                        if (objDict != nil) {
+                            [resultDict setObject:objDict forKey:properName];
+                        }
+                    }
+                }
+                break;
+            }
+            default:
+                break;
+        }
+    }
+    
+    return resultDict;
+}
+
++ (NSArray*)jsonDictArrayWithObjectArray:(NSArray*)objectArray
+{
+    NSMutableArray* result = [[NSMutableArray alloc] initWithCapacity:objectArray.count];
+    
+    for (id item in objectArray) {
+        NSDictionary* dict = [self jsonDictWithObject:item];
+        if (dict) {
+            [result addObject:dict];
+        }
+    }
+    return result;
+}
+
+#pragma mark - encoder & decoder
+
++ (void)encodeWithCoder:(NSCoder *)coder object:(id)object
+{
+    NSDictionary* propertyDicts = [self propertyDictWithClass:[object class] filterDictionary:[self filterDefaultProperty]];
+    
+    for (NSString* properName in propertyDicts) {
+        id value = [object valueForKey:properName];
+        if (value) {
+            [coder encodeObject:value forKey:properName];
+        }
+    }
+}
+
++ (id)initWithCoder:(NSCoder *)coder object:(id)object
+{
+    if (object) {
+        NSDictionary* propertyDicts = [self propertyDictWithClass:[object class] filterDictionary:[self filterDefaultProperty]];
+        for (NSString* properName in propertyDicts) {
+            id value = [coder decodeObjectForKey:properName];
+            if (value) {
+                [object setValue:value forKey:properName];
+            }
+        }
+    }
+    return object;
+}
+
+#pragma mark - for ovverrider object convinient
+
+- (void)encodeWithCoder:(NSCoder *)coder
+{
+    [FYJsonObject encodeWithCoder:coder object:self];
+}
+
+- (id)initWithCoder:(NSCoder *)coder
+{
+    if (self = [super init]) {
+        [FYJsonObject initWithCoder:coder object:self];
+    }
+    return self;
 }
 
 @end
